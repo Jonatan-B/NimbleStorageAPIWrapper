@@ -1,19 +1,19 @@
 function Get-NimbleInitiator {
     param(
         # Should we list all of the Initiators?
-        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, ParameterSetName="ListInitiators")]
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="ListInitiators")]
         [Switch]
         $List,
         # Should we list all of the Initiators?
-        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, ParameterSetName="InitiatorsDetail")]
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="InitiatorsDetail")]
         [Switch]
         $ListWithDetails,
         # Query for a specific Initiator ID
-        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, ParameterSetName="InitiatorId")]
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="InitiatorId")]
         [String]
         $InitiatorId,
         # Query for a specific Initiator ID
-        [Parameter(Position=1, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Position=1, Mandatory, ValueFromPipelineByPropertyName)]
         [String]
         $ArrayUrl
         
@@ -51,8 +51,13 @@ function Get-NimbleInitiator {
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = [IgnoreSSLWarning]::GetDelegate()
 
         Write-Verbose -Message "Invoking Method Get on $uri with token: $($Global:NimbleSession."Session__$ArrayUrl".SessionHeader.'X-Auth-Token')."
-        $ApiCallResult = Invoke-RestMethod -Uri $uri -Method Get -Header $Global:NimbleSession."Session__$ArrayUrl".SessionHeader -ErrorAction Stop
-        $ApiCallResult.Data
+        try {
+            (Invoke-RestMethod -Uri $uri -Method Get -Header $Global:NimbleSession."Session__$ArrayUrl".SessionHeader -ErrorAction Stop).data
+        }
+        catch {
+            $ErrorResults = Read-RestMethodError -ResultStream ($_.Exception.Response.GetResponseStream())   
+            Write-Error -Message ($ErrorResults.Messages.Text -join " ") -ErrorId ($ErrorResults.Messages.Code -join ", ") -ErrorAction Stop
+        }
 
         Write-Verbose -Message "Removing the Ignore SSL Warnings setting."
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null

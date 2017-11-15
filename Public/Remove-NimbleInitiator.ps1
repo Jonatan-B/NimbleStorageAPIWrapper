@@ -2,11 +2,11 @@ function Remove-NimbleInitiator {
     [CmdletBinding(SupportsShouldProcess=$true)]
     param(
         # The Initiator Group Id where the new initiator be added to.
-        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName)]
         [String]
         $InitiatorId,
         # Array that you want to connect to.
-        [Parameter(Position=1, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Position=1, Mandatory, ValueFromPipelineByPropertyName)]
         [String]
         $ArrayUrl
     )
@@ -39,7 +39,13 @@ function Remove-NimbleInitiator {
             Write-Verbose -Message "Configuring the Certificate Validation Callback to ignore SSL Warnings."
             [System.Net.ServicePointManager]::ServerCertificateValidationCallback = [IgnoreSSLWarning]::GetDelegate()
             
-            (Invoke-RestMethod @RestMethodParams -ErrorAction Stop).Data
+            try{
+                (Invoke-RestMethod @RestMethodParams -ErrorAction Stop).Data
+            }
+            catch {
+                $ErrorResults = Read-RestMethodError -ResultStream ($_.Exception.Response.GetResponseStream())   
+                Write-Error -Message ($ErrorResults.Messages.Text -join " ") -ErrorId ($ErrorResults.Messages.Code -join ", ") -ErrorAction Stop
+            }
 
             Write-Verbose -Message "Removing the Ignore SSL Warnings setting."
             [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null

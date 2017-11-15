@@ -2,11 +2,11 @@ function Sync-NimbleInitiatorGroup {
     [CmdletBinding(SupportsShouldProcess=$true)]
     param(
         # Volume Id where the new Record will be added to.
-        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName)]
         [String]
         $PartnerArray,
         # Array that you want to connect to.
-        [Parameter(Position=1, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Position=1, Mandatory, ValueFromPipelineByPropertyName)]
         [String]
         $ArrayUrl
     )

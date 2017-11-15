@@ -3,7 +3,8 @@ function Connect-NimbleVolumeToInitiator {
     param (
         # Name of the Initiator where the Volume will be connected to
         [Parameter(Mandatory, Position=0)]
-        [String]
+        [ValidateScript({ Test-NetConnection -ComputerName $_ -Port 5985 -InformationLevel Quiet })]
+        [String[]]
         $ComputerName,
         # Id of the Volume that will be connected to the Initiator.
         [Parameter(Mandatory, Position=1)]
@@ -26,138 +27,133 @@ function Connect-NimbleVolumeToInitiator {
         }
 
         Write-Verbose -Message "Nimble session to $ArrayUrl is connected and not expired. Continuing."
-
-        $VolumeInformation = Get-NimbleVolume -ListWithDetails -ArrayUrl $ArrayUrl | Where-Object Name -eq $VolumeName
-        
-        $DiscoveryNetworkIPs = Get-NimbleNetworkAdapter -ListWithDetails -ArrayUrl $ArrayUrl -AdapterRole Active | Select-Object -ExpandProperty subnet_list | Where-Object type -eq "data"
-        $IscsiTargetPortalPort = 3260
-        
-        $HostAddress_iScsiInterfaces = Invoke-Command -ComputerName $ComputerName -Command {Get-NetIpAddress -AddressFamily IPv4 -ErrorAction Stop | Where-Object InterfaceAlias -match "iscsi-[a-b]" }
-        if(!($HostAddress_iScsiInterfaces)){
-            throw "The machine $($computerName) does not have iscsi interfaces, or they are not properly labeled."
-        }
     }
     Process {
 
-        if(!($VolumeInformation)){
-            Write-Error -Message "Unable to find the volume $($VolumeName) on array $($ArrayUrl)."
-            return
-        }
-
-        if($VolumeInformation.owned_by_group -ne $ArrayUrl){
-            Write-Error -Message "The volume $($VolumeName) does not belong to this array. Initiators may not connect to it."
-            return
-        }
-
-        if($PSCmdlet.ShouldProcess($ComputerName, "Attach volume $($VolumeName).")) {
+        foreach($Computer in $ComputerName){
+            Write-Verbose -Message "Attempting to connect volume $($VolumeName) to initiator $($Computer)."
             
-
-            Write-Verbose -Message "Check if the iScsi drive is already connected."
-            $IsConnected = (invoke-command -ComputerName $ComputerName -Command { Get-IscsiSession | Where-Object TargetNodeAddress -eq $using:VolumeInformation.target_name }  ) -eq $null
-            if(!($IsConnected)){
-                Write-Verbose -Message "The machine $($ComputerName) already has the attached volume."
-                return
+            Write-Verbose -Message "Ensuring that that the volume exists."
+            $VolumeInformation = Get-NimbleVolume -ListWithDetails -ArrayUrl $ArrayUrl | Where-Object Name -eq $VolumeName
+            if(!($VolumeInformation)){
+                Write-Error -Message "Unable to find the volume $($VolumeName) on array $($ArrayUrl)." -ErrorAction Stop
+            }
+    
+            Write-Verbose -Message "Ensuring that that the volume is online."
+            if(!($VolumeInformation.online)) {
+                Write-Error -Message "The volume is not online, and cannot be connected to the initiator." -ErrorAction Stop
             }
             
-            foreach($DiscoveryNetworkIP in $DiscoveryNetworkIPs){
-                Write-Verbose -Message "Check that the array has been added to the discovery."
-                
+            Write-Verbose -Message "Ensuring that that the volume is owned by the array.."
+            if($ArrayUrl -notmatch $VolumeInformation.owned_by_group){
+                Write-Error -Message "The volume $($VolumeName) does not owned by $($ArrayUrl). Initiators may not connect to it." -ErrorAction Stop
+            }
+            
+            Write-Verbose -Message "Getting the IP addresses that will be used for iSCSI connections from $($Computer)."
+            $HostAddress_iScsiInterfaces = Get-NetIpAddress -AddressFamily IPv4 -CimSession $Computer -ErrorAction Stop | Where-Object { $_.IPAddress -match "^192\W168\W((6)|(20))\W\d?\d?\d?$" }
+            if(!($HostAddress_iScsiInterfaces)){
+                throw "The machine $($Computer) does not have iscsi interfaces, or they are not properly configured."
+            }    
+    
+            Write-Verbose -Message "Getting the data IP addresses from the array."
+            $ArrayDataNetworks = Get-NimbleNetworkAdapter -ListWithDetails -ArrayUrl $ArrayUrl -AdapterRole Active -ErrorAction Stop | Select-Object -ExpandProperty subnet_list | Where-Object type -eq "data"
+            if(!($ArrayDataNetworks)){
+                throw "The API call did not return an error, but also did not return any data. Check the array and ensure that the correct subnets are configured as data."
             }
 
-            Write-Verbose -Message "Creating the Nimble iScsi connection to the server."
-            foreach($NetworkInterface in $HostAddress_iScsiInterfaces){
-                if($NetworkInterface.InterfaceAlias -match "iscsi-[a-b]"){
-                    
-                    $NimbleDiscoveryIP = $DiscoveryNetworkIPs | Where-Object Label -match $Matches.0 | Select-Object -ExpandProperty discovery_ip
-                    Write-Verbose -Message "The $($ArrayUrl) discovery IP is: $($NimbleDiscoveryIP)"
+            $IscsiTargetPortalPort = 3260
+    
+            Write-Verbose -Message "Check that $($Computer) has the array added to its target portals."
+            $iSCSITargetPortals = Get-IscsiTargetPortal -TargetPortalAddress $ArrayDataNetworks.discovery_ip -TargetPortalPortNumber $IscsiTargetPortalPort -CimSession $Computer -ErrorAction SilentlyContinue
+            if(!($iSCSITargetPortals)){
+                Write-Warning -Message "No target portals were found in $($Computer) with IP addresses $($ArrayDataNetworks.discovery_ip -join ", ")"
 
-                    Write-Verbose -Message "Checking that the discovery IP exists as a TargetPortal on the server."
-                    $iScsiDiscoveryTargetPortal = Get-IscsiTargetPortal -CimSession $ComputerName | Where-Object { $_.TargetPortalAddress -eq $NimbleDiscoveryIP }
-                    if(!($iScsiDiscoveryTargetPortal)){
-                        Write-Warning -Message "The machine $($ComputerName) does not have the array $($ArrayUrl) in its discovery settings."
-                        Write-verbose -Message "Adding the target."
-                        try {
-                            $iScsiDiscoveryTargetPortal = New-IscsiTargetPortal -TargetPortalAddress $NimbleDiscoveryIP -TargetPortalPortNumber $IscsiTargetPortalPort -InitiatorPortalAddress $NetworkInterface.IpAddress -CimSession $ComputerName -ErrorAction Stop
-                        }
-                        catch {
-                            throw "The discovery ip $($NimbleDiscoveryIP) for $($ArrayUrl) is not found, and failed to be created."
-                        }
-                        
-                    }
+                if($ConfirmPreference -ne "None"){
+                    $ConfirmPreference = "High"
+                }
 
-                    try {
-                        Write-Verbose -Message "Getting the iscsi target $($VolumeInformation.target_name) on $($ComputerName) before attempting to connect it."
-                        Get-IscsiTarget -NodeAddress $VolumeInformation.target_name -CimSession $ComputerName -ErrorAction Stop  | Out-Null
-                    }
-                    catch {
-                        Write-Verbose -Message "Targets volume was not found on $($ComputerName) updating the list before trying again."
-                        Invoke-Command -ComputerName $ComputerName -Command {
-                            param($IPAddress)
-                            "Getting the Target Portal with address $($IpAddress)."
-                            Get-IscsiTargetPortal | Where-Object { $_.TargetPortalAddress -eq $IPAddress }
-                            $TargetPortal = Get-IscsiTargetPortal | Where-Object { $_.TargetPortalAddress -eq $IPAddress }
-                            if($TargetPortal){
-                                "Executing update iscsi target."
-                                Update-IscsiTarget -IscsiTargetPortal $TargetPortal
+                if($PSCmdlet.ShouldContinue("The array data IPs were not found as target portals on $($Computer), should they be added?","Add Discovery IPs as Target Portals on $($Computer)")){
+                    $ConfirmPreference = "Low"
+                    foreach($Interface in $ArrayDataNetworks){
+                        if($PSCmdlet.ShouldProcess($Computer, "Create TargetPortal with Ip $($Interface.discovery_ip):$($IscsiTargetPortalPort).")){
+                            try {
+                                Write-Verbose -Message "Attempting to add the target portal $($Interface.discovery_ip):$($IscsiTargetPortalPort) to $($Computer)."
+                                New-IscsiTargetPortal -TargetPortalAddress $Interface.discovery_ip -TargetPortalPortNumber $IscsiTargetPortalPort -CimSession $Computer -ErrorAction Stop
+                                Write-Verbose -Message "Target Portal $($Interface.discovery_ip):$($IscsiTargetPortalPort) successfully added to $($Computer)."
                             }
-                            else {
-                                "Target Portal not found."
+                            catch {
+                                Write-Error -Message "Failed to add a target portal with ip $($Interface.discovery_ip):$($IscsiTargetPortalPort) to $($Computer). Error: $($_.Exception.Message)" -ErrorAction Stop
                             }
-                            
-                        } -ArgumentList $NimbleDiscoveryIP
-                        
-                        
-                        Get-IscsiTarget -NodeAddress $VolumeInformation.target_name -CimSession $ComputerName -ErrorAction Stop | Out-Null
+                        }
                     }
-
-                    
-                    Write-Verbose -Message "The target was found, and will be connected."
-
-                    $ConnectIscsiParameters = @{
-                        NodeAddress = $VolumeInformation.target_name 
-                        TargetPortalAddress = $NimbleDiscoveryIP 
-                        TargetPortalPortNumber = $IscsiTargetPortalPort 
-                        InitiatorPortalAddress = $NetworkInterface.IpAddress 
-                        IsPersistent = $true 
-                        IsMultipathEnabled = $true 
-                        CimSession = $ComputerName
-                    }
-                    $ConnectIscsiParameters.Keys | ForEach-Object { Write-Verbose -Message "$($_) = $($ConnectIscsiParameters.$_)"}
-                    Write-Verbose -Message ""
-
-                    $NewIscsiSession = Connect-IscsiTarget @ConnectIscsiParameters -ErrorAction Stop
+                }
+                else {
+                    Write-Error -Message "Process aborted. The IP addresses $($ArrayDataNetworks.discovery_ip -join ", ") were not found as Target Portals and were not added. Cannot continue." -ErrorAction Stop
                 }
             }
-            if($NewIscsiSession){
-                Write-Verbose -Message "Getting the disk and setting it online."
-                
-                try{
-                    $NewIscsiSession | Get-Disk -CimSession $ComputerName | ForEach-Object { Set-Disk $_.Number -CimSession $ComputerName -IsOffline $false -ErrorAction Stop }
+            else {
+                Write-Verbose -Message "The Target Portals have been found. $($iSCSITArgetPortals.TargetPortalAddress -join ", ")"
+            }
+    
+            if($iSCSITargetPortals.length -lt $ArrayDataNetworks.length) {
+                Write-Warning -Message "$($Computer) does not have all of the iSCSI interfaces configured as target portals. We can still continue though."
+            }
+    
+            Write-Verbose -Message "Check if the iscsi target is found in $($Computer)."
+            $Attempts = 0
+            while($Attempts -lt 5){
+                try {                
+                    Write-Verbose -Message "Getting iSCSI targets on $($Computer)"
+                    $iSCSITarget = Get-IscsiTarget -NodeAddress $VolumeInformation.target_name -CimSession $Computer -ErrorAction Stop
+                    Write-Verbose -Message "Volume $($VolumeName) has been found in $($Computer)."
+                    break
                 }
                 catch {
-                    if($_.Exception -match "Microsoft Failover Clustering") {
-                        Invoke-Command -ComputerName $ComputerName -Command { 
-                            Import-Module FailoverClusters; 
-                            $resource = Get-ClusterSharedVolume -Name $using:VolumeName
-                            if($resource.State -ne "Online"){
-                                try {
-                                    $resource | Start-ClusterResource -ErrorAction Stop
-                                }
-                                catch {
-                                    Write-Warning -Message "Failed to do anyhting with the Cluster Resource. Make sure its fine."
-                                }
-                                
-                            }
-                            else {
-                                Write-Verbose -Message "The volume $($using:VolumeName) is a cluster drive and is already online."
-                            }
-                        }
+                    Write-Verbose -Message "A volume with NodeAddress $($VolumeInformation.target_name) could not be found in $($Computer)."
+                    if($Attempts -eq 4){
+                        Write-Error -Message "The volume $($VolumeName) cannot be found in $($Computer). Please check the initiator group permissions, and try again." -ErrorAction Stop
                     }
                     else {
-                        Write-Error -Message $_.Exception
+                        Write-Verbose -Message "Refreshing TargetPortals on $($Computer)"
+                        Invoke-command -ComputerName $Computer -command { $using:ArrayDataNetworks | ForEach-Object { iscsicli RefreshTargetPortal $_.discovery_ip $using:IscsiTargetPortalPort } } | Out-Null
+                        Write-Verbose -Message "Sleeping for 10 seconds and trying again."
+                        Start-Sleep -Seconds 15
+                        $Attempts++
                     }
                 }
-            }            
+            }
+    
+            Write-Verbose -Message "Check if the iScsi drive is already connected."
+            if(!($iSCSITarget.IsConnected)) {
+                if($PSCmdlet.ShouldProcess($Computer, "Attach volume $($VolumeName).")) {
+
+                    Write-Verbose -Message "Checking that the server has available iSCSI sessions."
+                    $iSCSISessions = Invoke-Command -ComputerName $Computer -Command { (Get-IscsiSession).Count } 
+                    if($iSCSISessions -gt 255) {
+                        Write-Error -Message "$($Computer) has $($iSCSISessions) sessions. We cannot add any more."
+                    }
+    
+                    $ConnectIscsiParameters = @{
+                        NodeAddress = $iSCSITarget.NodeAddress
+                        IsPersistent = $true 
+                        IsMultipathEnabled = $true 
+                        CimSession = $Computer
+                    }
+                    
+                    Write-Verbose -Message "Connecting the nimble volume to the server."
+                    try {
+                        Connect-IscsiTarget @ConnectIscsiParameters -ErrorAction Stop
+                        Write-Verbose -Message "The volume $($VolumeName) has been successfully connected to $($Computer)."
+                    }
+                    catch {
+                        Write-Error -Message "Failed to connect the Nimble Volume $($VolumeName) to $($Computer). Error: $($_.Exception.Message)" -ErrorAction Stop
+                    }          
+                }
+            }
+            else {
+                Write-Verbose -Message "The Volume has already been connected. Getting the iSCSI session to check that the Disk is online and initiated."
+                $iSCSITarget | Get-IscsiSession -CimSession $Computer
+            }
         }
     }
 }

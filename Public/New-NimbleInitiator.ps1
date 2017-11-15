@@ -2,28 +2,28 @@ function New-NimbleInitiator {
     [CmdletBinding(SupportsShouldProcess=$true)]
     param(
         # The protocol that will be used by the initiator.
-        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName)]
         [ValidateSet("iscsi")]
         [String]
         $Protocol,
         # The Initiator Group Id where the new initiator be added to.
-        [Parameter(Position=1, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Position=1, Mandatory, ValueFromPipelineByPropertyName)]
         [String]
         $InitiatorGroupId,
         # The Iqn name that the machine will use for the iscsi connection.
-        [Parameter(Position=2, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Position=2, Mandatory, ValueFromPipelineByPropertyName)]
         [String]
         $Iqn,
         # Array that you want to connect to.
-        [Parameter(Position=3, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Position=3, Mandatory, ValueFromPipelineByPropertyName)]
         [String]
         $ArrayUrl,
         # Ip Address to be used for iscsi authentication along witht he iqn. Default is '*' (Allow all)
-        [Parameter(ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(ValueFromPipelineByPropertyName)]
         [String]
         $IpAddress="*",
         # The friendly name to be given to the initiator. Default is same as Iqn.
-        [Parameter(ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(ValueFromPipelineByPropertyName)]
         [String]
         $Label = $Iqn
     )
@@ -72,7 +72,13 @@ function New-NimbleInitiator {
             Write-Verbose -Message "Configuring the Certificate Validation Callback to ignore SSL Warnings."
             [System.Net.ServicePointManager]::ServerCertificateValidationCallback = [IgnoreSSLWarning]::GetDelegate()
             
-            (Invoke-RestMethod @RestMethodParams -ErrorAction Stop).Data
+            try{
+                (Invoke-RestMethod @RestMethodParams -ErrorAction Stop).Data
+            }
+            catch {
+                $ErrorResults = Read-RestMethodError -ResultStream ($_.Exception.Response.GetResponseStream())   
+                Write-Error -Message ($ErrorResults.Messages.Text -join " ") -ErrorId ($ErrorResults.Messages.Code -join ", ") -ErrorAction Stop
+            }
 
             Write-Verbose -Message "Removing the Ignore SSL Warnings setting."
             [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null

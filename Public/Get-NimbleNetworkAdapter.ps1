@@ -1,24 +1,24 @@
 function Get-NimbleNetworkAdapter {
     param(
         # Should we list all of the Initiators?
-        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, ParameterSetName="ListNetworkAdapters")]
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="ListNetworkAdapters")]
         [Switch]
         $List,
         # Should we list all of the Initiators?
-        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, ParameterSetName="ListNetworkAdaptersWithDetails")]
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="ListNetworkAdaptersWithDetails")]
         [Switch]
         $ListWithDetails,
         # Query for a specific Initiator ID
-        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, ParameterSetName="NetworkAdapterId")]
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="NetworkAdapterId")]
         [String]
         $NetworkAdapterId,
         # The Url of the Nimble Array.
-        [Parameter(Position=1, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Position=1, Mandatory, ValueFromPipelineByPropertyName)]
         [String]
         $ArrayUrl,
         # What network interface should be returned?
-        [Parameter(Position=2, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, ParameterSetName="ListNetworkAdaptersWithDetails")]
-        [Parameter(ParameterSetName="ListNetworkAdapters")]
+        [Parameter(Position=2, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="ListNetworkAdaptersWithDetails")]
+        [Parameter(Position=2, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="ListNetworkAdapters")]
         [ValidateSet("Active","Backup","*")]
         [String]
         $AdapterRole
@@ -63,9 +63,14 @@ function Get-NimbleNetworkAdapter {
         Write-Verbose -Message "Invoking Method Get on $uri with token: $($Global:NimbleSession."Session__$ArrayUrl".SessionHeader.'X-Auth-Token')."
 
         
-
-        $ApiCallResult = Invoke-RestMethod -Uri $uri -Method Get -Header $Global:NimbleSession."Session__$ArrayUrl".SessionHeader -ErrorAction Stop
-        $ApiCallResult.Data 
+        try {
+            (Invoke-RestMethod -Uri $uri -Method Get -Header $Global:NimbleSession."Session__$ArrayUrl".SessionHeader -ErrorAction Stop).Data
+        }
+        catch {
+            $ErrorResults = Read-RestMethodError -ResultStream ($_.Exception.Response.GetResponseStream())   
+            
+            Write-Error -Message ($ErrorResults.Messages.Text -join " ") -ErrorId ($ErrorResults.Messages.Code -join ", ") -ErrorAction Stop
+        }
 
         Write-Verbose -Message "Removing the Ignore SSL Warnings setting."
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null

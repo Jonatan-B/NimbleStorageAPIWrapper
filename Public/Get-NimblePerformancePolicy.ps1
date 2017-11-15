@@ -1,21 +1,22 @@
-function Get-NimbleAccessControlRecord {
+function Get-NimblePerformancePolicy {
     param(
-        # Should we list all of the AccessControlRecords?
-        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="ListAccessControlRecords")]
+        # Should we list all of the Performance Policies?
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="ListPerformancePolicies")]
         [Switch]
         $List,
-        # Should we list all of the AccessControlRecords?
-        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="AccessControlRecordDetail")]
+        # Should we list all of the Performance Policies?
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="PerformancePoliciesDetail")]
         [Switch]
         $ListWithDetails,
-        # Query for a specific AccessControlRecord ID
-        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="AccessControlRecordId")]
+        # Query for a specific Performance Policy ID
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="PerformancePolicyId")]
         [String]
-        $AccessControlRecordId,
+        $PerformancePolicyId,
         # Array that you want to connect to.
         [Parameter(Position=1, Mandatory, ValueFromPipelineByPropertyName)]
         [String]
-        $ArrayUrl        
+        $ArrayUrl
+        
     )
     begin {
         if($Global:NimbleSession."Session__$ArrayUrl"){
@@ -31,14 +32,14 @@ function Get-NimbleAccessControlRecord {
         Write-Verbose -Message "Nimble session to $ArrayUrl is connected and not expired. Continuing."
         
         switch($PSCmdlet.ParameterSetName){
-            "ListAccessControlRecords" {
-                $uri = ($Global:NimbleApiUrls.GetACRecordsOverview -f $Global:NimbleSession."Session__$ArrayUrl".NimbleArrayUrl)
+            "ListPerformancePolicies" {
+                $uri = ($Global:NimbleApiUrls.GetPerformancePoliciesOverview -f $Global:NimbleSession."Session__$ArrayUrl".NimbleArrayUrl)
             }
-            "AccessControlRecordId" {
-                $uri = ($Global:NimbleApiUrls.GetACRecordById -f $Global:NimbleSession."Session__$ArrayUrl".NimbleArrayUrl, $AccessControlRecordId)
+            "PerformancePolicyId" {
+                $uri = ($Global:NimbleApiUrls.GetPerformancePolicyById -f $Global:NimbleSession."Session__$ArrayUrl".NimbleArrayUrl, $PerformancePolicyId)
             }
-            "AccessControlRecordDetail" {
-                $uri = ($Global:NimbleApiUrls.GetACRecordsDetails -f $Global:NimbleSession."Session__$ArrayUrl".NimbleArrayUrl)
+            "PerformancePoliciesDetail" {
+                $uri = ($Global:NimbleApiUrls.GetPerformancePoliciesDetails -f $Global:NimbleSession."Session__$ArrayUrl".NimbleArrayUrl)
             }
         }
     }
@@ -48,7 +49,7 @@ function Get-NimbleAccessControlRecord {
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = [IgnoreSSLWarning]::GetDelegate()
 
         Write-Verbose -Message "Invoking Method Get on $uri with token: $($Global:NimbleSession."Session__$ArrayUrl".SessionHeader.'X-Auth-Token')."
-        try {
+        try{
             (Invoke-RestMethod -Uri $uri -Method Get -Header $Global:NimbleSession."Session__$ArrayUrl".SessionHeader -ErrorAction Stop).Data
         }
         catch {

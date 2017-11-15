@@ -1,19 +1,19 @@
 function Get-NimbleVolume {
     param(
         # Should we list all of the volumes?
-        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, ParameterSetName="ListVolumes")]
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="ListVolumes")]
         [Switch]
         $List,
         # Should we list all of the volumes?
-        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, ParameterSetName="VolumeDetail")]
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="VolumeDetail")]
         [Switch]
         $ListWithDetails,
         # Query for a specific Volume ID
-        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, ParameterSetName="VolumeId")]
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName, ParameterSetName="VolumeId")]
         [String]
         $VolumeId,
         # Array that you want to connect to.
-        [Parameter(Position=1, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Position=1, Mandatory, ValueFromPipelineByPropertyName)]
         [String]
         $ArrayUrl
         
@@ -49,8 +49,13 @@ function Get-NimbleVolume {
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = [IgnoreSSLWarning]::GetDelegate()
 
         Write-Verbose -Message "Invoking Method Get on $uri with token: $($Global:NimbleSession."Session__$ArrayUrl".SessionHeader.'X-Auth-Token')."
-        $ApiCallResult = Invoke-RestMethod -Uri $uri -Method Get -Header $Global:NimbleSession."Session__$ArrayUrl".SessionHeader -ErrorAction Stop
-        $ApiCallResult.Data
+        try{
+            (Invoke-RestMethod -Uri $uri -Method Get -Header $Global:NimbleSession."Session__$ArrayUrl".SessionHeader -ErrorAction Stop).Data
+        }
+        catch {
+            $ErrorResults = Read-RestMethodError -ResultStream ($_.Exception.Response.GetResponseStream())   
+            Write-Error -Message ($ErrorResults.Messages.Text -join " ") -ErrorId ($ErrorResults.Messages.Code -join ", ") -ErrorAction Stop
+        }
 
         Write-Verbose -Message "Removing the Ignore SSL Warnings setting."
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null

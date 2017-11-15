@@ -2,12 +2,12 @@ function Remove-NimbleAccessControlRecord {
     [CmdletBinding(SupportsShouldProcess=$true)]
     param(
         # Volume Id where the new Record will be added to.
-        [Parameter(Position=0, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Position=0, Mandatory, ValueFromPipelineByPropertyName)]
         [Alias("ACRId")]
         [String]
         $AccessControlRecordId,
         # Array that you want to connect to.
-        [Parameter(Position=1, Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Position=1, Mandatory, ValueFromPipelineByPropertyName)]
         [String]
         $ArrayUrl
     )
@@ -40,7 +40,13 @@ function Remove-NimbleAccessControlRecord {
             Write-Verbose -Message "Configuring the Certificate Validation Callback to ignore SSL Warnings."
             [System.Net.ServicePointManager]::ServerCertificateValidationCallback = [IgnoreSSLWarning]::GetDelegate()
             
-            Invoke-RestMethod @RestMethodParams -ErrorAction Stop
+            try{
+                Invoke-RestMethod @RestMethodParams -ErrorAction Stop
+            }
+            catch {
+                $ErrorResults = Read-RestMethodError -ResultStream ($_.Exception.Response.GetResponseStream())   
+                Write-Error -Message ($ErrorResults.Messages.Text -join " ") -ErrorId ($ErrorResults.Messages.Code -join ", ") -ErrorAction Stop
+            }
 
             Write-Verbose -Message "Removing the Ignore SSL Warnings setting."
             [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null
